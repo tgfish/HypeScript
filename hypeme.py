@@ -17,12 +17,12 @@ License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 """
 
+import os
 import unicodedata
-from time import time
+import time
 import sys
 import urllib2
 import urllib
-from time import time
 from bs4 import BeautifulSoup
 import json
 import string
@@ -34,12 +34,19 @@ import string
 # 'track/<id>'
 ############################################
 AREA_TO_SCRAPE = 'popular'
-NUMBER_OF_PAGES = 3
+ask_pages = raw_input ("How many pages would you like to download? ").strip()
+NUMBER_OF_PAGES = int(ask_pages)
 
 ###DO NOT MODIFY THESE UNLES YOU KNOW WHAT YOU ARE DOING####
 DEBUG = False
 HYPEM_URL = 'http://hypem.com/{}'.format(AREA_TO_SCRAPE)
 
+foldername = "Hypem Download"
+if not os.path.exists(foldername):
+    os.makedirs(foldername)
+print "\tCREATED FOLDER:" + foldername
+dir_path = foldername  
+files_downloaded = 0
 
 validFilenameChars = "-_.() %s%s" % (string.ascii_letters, string.digits)
 
@@ -74,12 +81,14 @@ class HypeScraper:
       
       print "\tPARSED {} SONGS".format(len(tracks) )
       
-      self.download_songs(tracks, cookie)
-      
+      self.download_songs(i, tracks, cookie)
+    
+    files_downloaded_str = str(files_downloaded)	
+    print "DOWNLOADED "  + files_downloaded_str + " FILES"      
       
   def get_html_file(self, url):
     data = {'ax':1 ,
-              'ts': time()
+              'ts': time.time()
           }
     data_encoded = urllib.urlencode(data)
     complete_url = url + "?{}".format(data_encoded)
@@ -106,7 +115,7 @@ class HypeScraper:
       return track_list
       
   #tracks have id, title, artist, key
-  def download_songs(self, tracks, cookie):
+  def download_songs(self, i, tracks, cookie):
   
     print "\tDOWNLOADING SONGS..."
     for track in tracks:
@@ -116,37 +125,50 @@ class HypeScraper:
       artist = removeDisallowedFilenameChars(track[u"artist"])
       title = removeDisallowedFilenameChars(track[u"song"])
       type = track[u"type"]
+   
+      if os.path.exists(os.path.join(dir_path, ("{} - {}.mp3".format(artist, title)))):
+        print "\tFILE EXISTS, SKIPPING: {} - {}.mp3".format(artist, title)
+      else:
+        print "\tFETCHING SONG...." 
+        print u"\t{} by {}".format(title, artist)
       
-      print "\tFETCHING SONG...."
-      
-      print u"\t{} by {}".format(title, artist)
-      
-      if type is False:
-        continue
+        if type is False:
+          continue
        
-      try:
-        serve_url = "http://hypem.com/serve/source/{}/{}".format(id, key)
-        request = urllib2.Request(serve_url, "" , {'Content-Type': 'application/json'})
-        request.add_header('cookie', cookie)
-        response = urllib2.urlopen(request)
-        song_data_json = response.read()
-        response.close()
-        song_data = json.loads(song_data_json)
-        url = song_data[u"url"]
+        try:
+          serve_url = "http://hypem.com/serve/source/{}/{}".format(id, key)
+          request = urllib2.Request(serve_url, "" , {'Content-Type': 'application/json'})
+          request.add_header('cookie', cookie)
+          response = urllib2.urlopen(request)
+          song_data_json = response.read()
+          response.close()
+          song_data = json.loads(song_data_json)
+          url = song_data[u"url"]
         
-        download_response = urllib2.urlopen(url)
-        filename = "{} - {}.mp3".format(artist, title)
-        mp3_song_file = open(filename, "wb")
-        mp3_song_file.write(download_response.read() )
-        mp3_song_file.close()
-      except urllib2.HTTPError, e:
-            print 'HTTPError = ' + str(e.code) + " trying hypem download url."
-      except urllib2.URLError, e:
-            print 'URLError = ' + str(e.reason)  + " trying hypem download url."
-      except Exception, e:
-            print 'generic exception: ' + str(e)
-      
-  
+          download_response = urllib2.urlopen(url)
+          filename = "{} - {}.mp3".format(artist, title)
+          mp3_song_file = open(os.path.join(dir_path, filename), "wb")
+          mp3_song_file.write(download_response.read() )
+          mp3_song_file.close()
+          files_downloaded = files_downloaded + 1
+          with open(os.path.join(dir_path, "log.txt"), "a") as text_file:
+               text_file.write("{} - {}.mp3\n".format(artist, title))
+               text_file.close()
+        except urllib2.HTTPError, e:
+              print 'HTTPError = ' + str(e.code) + " trying hypem download url."
+              with open(os.path.join(dir_path, "Failed_songs_log.txt"), "a") as text_file:
+                   text_file.write("HTTPError = {}, Page {}, {} - {}.mp3\n".format(e, i, artist, title))
+                   text_file.close()
+        except urllib2.URLError, e:
+              print 'URLError = ' + str(e.reason)  + " trying hypem download url."
+              with open(os.path.join(dir_path, "Failed_songs_log.txt"), "a") as text_file:
+                   text_file.write("URLError = {}, Page {}, {} - {}.mp3\n".format(e, i, artist, title))
+                   text_file.close()
+        except Exception, e:
+              print 'generic exception: ' + str(e)
+              with open(os.path.join(dir_path, "Failed_songs_log.txt"), "a") as text_file:
+                   text_file.write("General Exception = {}, Page {}, {} - {}.mp3\n".format(e, i, artist, title))
+                   text_file.close()
      
 
 def main():
