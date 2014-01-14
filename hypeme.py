@@ -17,15 +17,27 @@ License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 """
 
+import argparse
+import os
 import unicodedata
-from time import time
-import sys
+import time
+#import sys
 import urllib2
 import urllib
-from time import time
 from bs4 import BeautifulSoup
 import json
 import string
+
+DEBUG = False
+validFilenameChars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+
+#Define script argument for page(s) to download
+parser = argparse.ArgumentParser()
+parser.add_argument("hypempages", help="Hypem.com Profile Page(s) to download", type=int ) #Page or Pages to download
+parser.add_argument("--s", help="Download only a single Hypem.com Page", action="store_true" ) #Single Page Option
+args = parser.parse_args()
+argval = vars(args)
+NUMBER_OF_PAGES = argval.pop('hypempages')
 
 ##############AREA_TO_SCRAPE################
 # This is the general area that you'd 
@@ -33,20 +45,22 @@ import string
 # ex. 'popular', 'latest', '<username>' or
 # 'track/<id>'
 ############################################
-AREA_TO_SCRAPE = 'popular'
-NUMBER_OF_PAGES = 3
-
-###DO NOT MODIFY THESE UNLES YOU KNOW WHAT YOU ARE DOING####
-DEBUG = False
+AREA_TO_SCRAPE = 'phishie'
 HYPEM_URL = 'http://hypem.com/{}'.format(AREA_TO_SCRAPE)
 
+#Create directory to put songs 
+foldername = "Hypem Download"
+if not os.path.exists(foldername):
+    os.makedirs(foldername)
+dir_path = foldername  
 
-validFilenameChars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+############
+############
+############
 
 def removeDisallowedFilenameChars(filename):
     cleanedFilename = unicodedata.normalize('NFKD', filename).encode('ASCII', 'ignore')
     return ''.join(c for c in cleanedFilename if c in validFilenameChars)
-
 
 class HypeScraper:
   
@@ -54,32 +68,34 @@ class HypeScraper:
     pass
     
   def start(self):
-    print "--------STARTING DOWNLOAD--------"
-    print "\tURL : {} ".format(HYPEM_URL)
-    print "\tPAGES: {}".format(NUMBER_OF_PAGES)
+    print "SCRAPING URL: {} ".format(HYPEM_URL)
     
-    for i in range(1, NUMBER_OF_PAGES + 1):
-    
-      print "PARSING PAGE: {}".format(i)
-    
-      page_url = HYPEM_URL + "/{}".format(i)
+    if args.s:
+      print "PARSING ONLY SINGLE PAGE #: {}".format(NUMBER_OF_PAGES)        
+      #self.execute(NUMBER_OF_PAGES)
+      page_url = HYPEM_URL + "/{}".format(NUMBER_OF_PAGES)
       html, cookie = self.get_html_file(page_url)
-
-      if DEBUG:
-        html_file = open("hypeHTML.html", "w")
-        html_file.write(html)
-        html_file.close()
-        
       tracks = self.parse_html(html)
-      
       print "\tPARSED {} SONGS".format(len(tracks) )
-      
-      self.download_songs(tracks, cookie)
-      
+      files_dl = self.download_songs(NUMBER_OF_PAGES, tracks, cookie)
+      files_dl_str = str(files_dl) 
+          
+    else:
+      for i in range(1, NUMBER_OF_PAGES + 1): 
+        print "PARSING PAGE: {} of {}".format(i, NUMBER_OF_PAGES)        
+        #self.execute(NUMBER_OF_PAGES)
+        page_url = HYPEM_URL + "/{}".format(i)
+        html, cookie = self.get_html_file(page_url)
+        tracks = self.parse_html(html)
+        print "\tPARSED {} SONGS".format(len(tracks) )
+        files_dl = self.download_songs(i, tracks, cookie)
+        files_dl_str = str(files_dl)    
+    
+    print "DOWNLOADED "  + files_dl_str + " FILES" 
       
   def get_html_file(self, url):
     data = {'ax':1 ,
-              'ts': time()
+              'ts': time.time()
           }
     data_encoded = urllib.urlencode(data)
     complete_url = url + "?{}".format(data_encoded)
@@ -106,26 +122,33 @@ class HypeScraper:
       return track_list
       
   #tracks have id, title, artist, key
-  def download_songs(self, tracks, cookie):
-  
-    print "\tDOWNLOADING SONGS..."
+  def download_songs(self, i, tracks, cookie):
+
+    files_downloaded = 0  
+
+    print "DOWNLOADING SONGS..."
     for track in tracks:
     
       key = track[u"key"]
-      id = track[u"id"]
+      sid = track[u"id"]
       artist = removeDisallowedFilenameChars(track[u"artist"])
       title = removeDisallowedFilenameChars(track[u"song"])
-      type = track[u"type"]
-      
-      print "\tFETCHING SONG...."
-      
-      print u"\t{} by {}".format(title, artist)
-      
-      if type is False:
-        continue
+      stype = track[u"type"]
        
+      if stype is False:
+        print "\tNO LONGER AVAILABLE, SKIPPING:   [{}] {} by {}".format(stype, title, artist)
+        with open(os.path.join(dir_path, "Expired_Songs.txt"), "a") as text_file:
+          text_file.write("Page {}, {} - {}\n".format(i, artist, title))
+          text_file.close()
+        continue
+   
+      if os.path.exists(os.path.join(dir_path, ("{} - {}.mp3".format(artist, title)))):
+        print "\tFILE EXISTS, SKIPPING:   {} - {}.mp3".format(artist, title)
+      else:
+        print "\tFETCHING SONG:  [{}] {} by {}".format(stype, title, artist)
+           
       try:
-        serve_url = "http://hypem.com/serve/source/{}/{}".format(id, key)
+        serve_url = "http://hypem.com/serve/source/{}/{}".format(sid, key)
         request = urllib2.Request(serve_url, "" , {'Content-Type': 'application/json'})
         request.add_header('cookie', cookie)
         response = urllib2.urlopen(request)
@@ -133,21 +156,33 @@ class HypeScraper:
         response.close()
         song_data = json.loads(song_data_json)
         url = song_data[u"url"]
-        
+      
         download_response = urllib2.urlopen(url)
         filename = "{} - {}.mp3".format(artist, title)
-        mp3_song_file = open(filename, "wb")
+        mp3_song_file = open(os.path.join(dir_path, filename), "wb")
         mp3_song_file.write(download_response.read() )
         mp3_song_file.close()
+        files_downloaded = files_downloaded + 1
+        with open(os.path.join(dir_path, "log.txt"), "a") as text_file:
+          text_file.write("{} - {}.mp3\n".format(artist, title))
+          text_file.close()
       except urllib2.HTTPError, e:
             print 'HTTPError = ' + str(e.code) + " trying hypem download url."
+            with open(os.path.join(dir_path, "Failed_songs_log.txt"), "a") as text_file:
+              text_file.write("HTTPError = {}, Page {}, {} - {}.mp3\n".format(e, i, artist, title))
+              text_file.close()
       except urllib2.URLError, e:
             print 'URLError = ' + str(e.reason)  + " trying hypem download url."
+            with open(os.path.join(dir_path, "Failed_songs_log.txt"), "a") as text_file:
+              text_file.write("URLError = {}, Page {}, {} - {}.mp3\n".format(e, i, artist, title))
+              text_file.close()
       except Exception, e:
             print 'generic exception: ' + str(e)
-      
-  
-     
+            with open(os.path.join(dir_path, "Failed_songs_log.txt"), "a") as text_file:
+              text_file.write("General Exception = {}, Page {}, {} - {}.mp3\n".format(e, i, artist, title))
+              text_file.close()
+                
+    return files_downloaded 
 
 def main():
   scraper = HypeScraper()
@@ -155,4 +190,3 @@ def main():
        
 if __name__ == "__main__":
     main()
-    
