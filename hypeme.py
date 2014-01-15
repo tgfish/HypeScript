@@ -68,7 +68,8 @@ class HypeScraper:
     pass
     
   def start(self):
-    print "SCRAPING URL: {} ".format(HYPEM_URL)
+    total_files_dl = 0
+    print "SCRAPING URL: {} ".format(HYPEM_URL)  
     
     if args.s:
       print "PARSING ONLY SINGLE PAGE #: {}".format(NUMBER_OF_PAGES)        
@@ -78,20 +79,28 @@ class HypeScraper:
       tracks = self.parse_html(html)
       print "\tPARSED {} SONGS".format(len(tracks) )
       files_dl = self.download_songs(NUMBER_OF_PAGES, tracks, cookie)
-      files_dl_str = str(files_dl) 
+      total_files_dl_str = str(files_dl)
           
     else:
       for i in range(1, NUMBER_OF_PAGES + 1): 
         print "PARSING PAGE: {} of {}".format(i, NUMBER_OF_PAGES)        
-        #self.execute(NUMBER_OF_PAGES)
         page_url = HYPEM_URL + "/{}".format(i)
         html, cookie = self.get_html_file(page_url)
-        tracks = self.parse_html(html)
-        print "\tPARSED {} SONGS".format(len(tracks) )
-        files_dl = self.download_songs(i, tracks, cookie)
-        files_dl_str = str(files_dl)    
-    
-    print "DOWNLOADED "  + files_dl_str + " FILES" 
+        if html == "": #failed to download page
+          continue
+        else:    
+          tracks = self.parse_html(html)
+          print "\tPARSED {} SONGS".format(len(tracks) )
+          files_dl = self.download_songs(i, tracks, cookie)
+          total_files_dl = total_files_dl + files_dl
+          total_files_dl_str = str(total_files_dl)
+               
+    print "DOWNLOADED "  + total_files_dl_str + " TOTAL FILES" 
+
+    with open(os.path.join(dir_path, "Downloaded_Songs.txt"), "a") as text_file:
+      text_file.write("DOWNLOADED {} TOTAL FILES".format(total_files_dl_str))
+      #text_file.write("{} - {}.mp3\n".format(artist, title))
+      text_file.close()
       
   def get_html_file(self, url):
     data = {'ax':1 ,
@@ -100,13 +109,22 @@ class HypeScraper:
     data_encoded = urllib.urlencode(data)
     complete_url = url + "?{}".format(data_encoded)
     request = urllib2.Request(complete_url)
-    response = urllib2.urlopen(request)
-    #save our cookie
-    cookie = response.headers.get('Set-Cookie')
-    #grab the HTML
-    html = response.read()
-    response.close()
-    return html, cookie
+    try: response = urllib2.urlopen(request)
+    except urllib2.HTTPError, e:
+        print '\tHTTPError = ' + str(e.code) + " trying hypem page url."
+        with open(os.path.join(dir_path, "Failed_Pages.txt"), "a") as text_file:
+          text_file.write("Failed to download the following page URL due to error code {}:\n {}\n".format(e.code, url))
+          text_file.close()
+        html = ''
+        cookie = ''
+        return html, cookie
+    else:
+      #save our cookie
+      cookie = response.headers.get('Set-Cookie')
+      #grab the HTML
+      html = response.read()
+      response.close()
+      return html, cookie
     
   def parse_html(self, html):
     track_list = []
@@ -124,9 +142,8 @@ class HypeScraper:
   #tracks have id, title, artist, key
   def download_songs(self, i, tracks, cookie):
 
-    files_downloaded = 0  
-
     print "DOWNLOADING SONGS..."
+    files_downloaded = 0 
     for track in tracks:
     
       key = track[u"key"]
@@ -134,7 +151,8 @@ class HypeScraper:
       artist = removeDisallowedFilenameChars(track[u"artist"])
       title = removeDisallowedFilenameChars(track[u"song"])
       stype = track[u"type"]
-       
+ 
+    
       if stype is False:
         print "\tNO LONGER AVAILABLE, SKIPPING:   [{}] {} by {}".format(stype, title, artist)
         with open(os.path.join(dir_path, "Expired_Songs.txt"), "a") as text_file:
@@ -144,6 +162,10 @@ class HypeScraper:
    
       if os.path.exists(os.path.join(dir_path, ("{} - {}.mp3".format(artist, title)))):
         print "\tFILE EXISTS, SKIPPING:   {} - {}.mp3".format(artist, title)
+        with open(os.path.join(dir_path, "Existing_Songs.txt"), "a") as text_file:
+          text_file.write("{} - {}.mp3\n".format(artist, title))
+          text_file.close()
+        continue        
       else:
         print "\tFETCHING SONG:  [{}] {} by {}".format(stype, title, artist)
            
@@ -163,22 +185,22 @@ class HypeScraper:
         mp3_song_file.write(download_response.read() )
         mp3_song_file.close()
         files_downloaded = files_downloaded + 1
-        with open(os.path.join(dir_path, "log.txt"), "a") as text_file:
+        with open(os.path.join(dir_path, "Downloaded_Songs.txt"), "a") as text_file:
           text_file.write("{} - {}.mp3\n".format(artist, title))
           text_file.close()
       except urllib2.HTTPError, e:
-            print 'HTTPError = ' + str(e.code) + " trying hypem download url."
-            with open(os.path.join(dir_path, "Failed_songs_log.txt"), "a") as text_file:
+            print '\t -HTTPError = ' + str(e.code) + " trying hypem download url."
+            with open(os.path.join(dir_path, "Failed_Songs.txt"), "a") as text_file:
               text_file.write("HTTPError = {}, Page {}, {} - {}.mp3\n".format(e, i, artist, title))
               text_file.close()
       except urllib2.URLError, e:
-            print 'URLError = ' + str(e.reason)  + " trying hypem download url."
-            with open(os.path.join(dir_path, "Failed_songs_log.txt"), "a") as text_file:
+            print '\t -URLError = ' + str(e.reason)  + " trying hypem download url."
+            with open(os.path.join(dir_path, "Failed_Songs.txt"), "a") as text_file:
               text_file.write("URLError = {}, Page {}, {} - {}.mp3\n".format(e, i, artist, title))
               text_file.close()
       except Exception, e:
-            print 'generic exception: ' + str(e)
-            with open(os.path.join(dir_path, "Failed_songs_log.txt"), "a") as text_file:
+            print '\t -Generic Exception: ' + str(e)
+            with open(os.path.join(dir_path, "Failed_Songs.txt"), "a") as text_file:
               text_file.write("General Exception = {}, Page {}, {} - {}.mp3\n".format(e, i, artist, title))
               text_file.close()
                 
